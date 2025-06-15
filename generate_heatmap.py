@@ -289,84 +289,201 @@ HTML_TEMPLATE = """
 </html>
 """
 
+def _process_locations_format(file_handle):
+    """Processes the older 'locations' array format from Google Takeout or iOS."""
+    print("[INFO] 'locations' format detected. Processing...")
+    points = []
+    # Google stores coordinates as integers, so they must be scaled by 1e-7.
+    E7 = 1e-7
+    locations = ijson.items(file_handle, 'locations.item')
+    for i, loc in enumerate(locations):
+        if 'latitudeE7' in loc and 'longitudeE7' in loc:
+            lat = loc['latitudeE7'] * E7
+            lon = loc['longitudeE7'] * E7
+            points.append([lat, lon])
+        if (i + 1) % 50000 == 0:
+            print(f"  [PROGRESS] {i+1:,} locations processed...")
+    return points
+
+def _process_semantic_segments_format(file_handle, config):
+    """Processes the newer 'semanticSegments' (Android) format."""
+    print("[INFO] 'semanticSegments' format detected. Processing...")
+    points = []
+    # Regular expression to find floating-point numbers in coordinate strings.
+    coord_regex = re.compile(r"([-]?\d+\.\d+)")
+    def parse_lat_lng_string(lat_lng_str):
+        if not isinstance(lat_lng_str, str): return None
+        try:
+            coords = [float(c) for c in coord_regex.findall(lat_lng_str)]
+            return [coords[0], coords[1]] if len(coords) == 2 else None
+        except (ValueError, AttributeError): return None
+    
+    segments = ijson.items(file_handle, 'semanticSegments.item')
+    for i, segment in enumerate(segments):
+        try:
+            if config["INCLUDE_RAW_PATH"] and 'timelinePath' in segment:
+                for path_point in segment.get('timelinePath', []):
+                    if coords := parse_lat_lng_string(path_point.get('point')): points.append(coords)
+            elif config["INCLUDE_VISITS"] and 'visit' in segment:
+                if lat_lng := segment.get('visit', {}).get('topCandidate', {}).get('placeLocation', {}).get('latLng'):
+                    if coords := parse_lat_lng_string(lat_lng): points.append(coords)
+            elif config["INCLUDE_ACTIVITIES"] and 'activity' in segment:
+                activity = segment.get('activity', {})
+                if start_lat_lng := activity.get('start', {}).get('latLng'):
+                    if coords := parse_lat_lng_string(start_lat_lng): points.append(coords)
+                if end_lat_lng := activity.get('end', {}).get('latLng'):
+                    if coords := parse_lat_lng_string(end_lat_lng): points.append(coords)
+        except Exception:
+            print(f"\n[WARNING] Error processing segment #{i+1}. Skipping.")
+            continue
+        if (i + 1) % 20000 == 0:
+            print(f"  [PROGRESS] {i+1:,} segments processed...")
+    return points
+
+def _process_timeline_objects_format(file_handle, config):
+    """Processes the newer 'timelineObjects' (iOS) format."""
+    print("[INFO] 'timelineObjects' (iOS) format detected. Processing...")
+    points = []
+    E7 = 1e-7
+    timeline_objects = ijson.items(file_handle, 'timelineObjects.item')
+    
+    for i, t_object in enumerate(timeline_objects):
+        try:
+            if config["INCLUDE_VISITS"] and 'placeVisit' in t_object:
+                if location := t_object.get('placeVisit', {}).get('location', {}):
+                    if 'latitudeE7' in location and 'longitudeE7' in location:
+                        points.append([location['latitudeE7'] * E7, location['longitudeE7'] * E7])
+            
+            elif config["INCLUDE_ACTIVITIES"] and 'activitySegment' in t_object:
+                segment = t_object.get('activitySegment', {})
+                if start_loc := segment.get('startLocation'):
+                    if 'latitudeE7' in start_loc and 'longitudeE7' in start_loc:
+                        points.append([start_loc['latitudeE7'] * E7, start_loc['longitudeE7'] * E7])
+                if end_loc := segment.get('endLocation'):
+                    if 'latitudeE7' in end_loc and 'longitudeE7' in end_loc:
+                        points.append([end_loc['latitudeE7'] * E7, end_loc['longitudeE7'] * E7])
+
+                if config["INCLUDE_RAW_PATH"] and (raw_path := segment.get('simplifiedRawPath')):
+                    for point in raw_path.get('points', []):
+                        if 'latE7' in point and 'lngE7' in point:
+                            points.append([point['latE7'] * E7, point['lngE7'] * E7])
+        except Exception:
+            print(f"\n[WARNING] Error processing timeline object #{i+1}. Skipping.")
+            continue
+        if (i + 1) % 20000 == 0:
+            print(f"  [PROGRESS] {i+1:,} timeline objects processed...")
+    return points
+
+def _process_root_array_format(file_handle, config):
+    """
+    Processes a JSON format where the root is a direct array of records.
+    This format also contains 'visit' and 'activity' objects.
+    """
+    print("[INFO] Root array format detected. Processing...")
+    points = []
+    # This regex helper function is reused from the semantic segments parser.
+    coord_regex = re.compile(r"([-]?\d+\.\d+)")
+    def parse_lat_lng_string(lat_lng_str):
+        if not isinstance(lat_lng_str, str): return None
+        try:
+            # It finds the two floating point numbers in strings like "geo:35.123,-47.456"
+            coords = [float(c) for c in coord_regex.findall(lat_lng_str)]
+            return [coords[0], coords[1]] if len(coords) == 2 else None
+        except (ValueError, AttributeError): return None
+
+    # The '.item' suffix tells ijson to iterate through the items of the root array.
+    records = ijson.items(file_handle, 'item')
+    
+    for i, record in enumerate(records):
+        try:
+            # Check if the object is a 'visit'.
+            if config["INCLUDE_VISITS"] and 'visit' in record:
+                if lat_lng := record.get('visit', {}).get('topCandidate', {}).get('placeLocation'):
+                    if coords := parse_lat_lng_string(lat_lng):
+                        points.append(coords)
+            
+            # Check if the object is an 'activity'.
+            elif config["INCLUDE_ACTIVITIES"] and 'activity' in record:
+                activity = record.get('activity', {})
+                if start_coords := parse_lat_lng_string(activity.get('start')):
+                    points.append(start_coords)
+                if end_coords := parse_lat_lng_string(activity.get('end')):
+                    points.append(end_coords)
+
+        except Exception:
+            # If an error occurs processing a single record, skip it and continue.
+            print(f"\n[WARNING] Error processing record #{i+1}. Skipping.")
+            continue
+
+        if (i + 1) % 20000 == 0:
+            print(f"  [PROGRESS] {i+1:,} records processed...")
+            
+    return points
+
 def extract_locations(config):
+    """
+    Detects the JSON format by sniffing the file's start
+    and calls the appropriate processing function.
+    Handles all known formats: root array, 'locations', 'semanticSegments', or 'timelineObjects'.
+    """
     print("\n--- [PHASE 1/3] Processing JSON File ---")
     input_file = config["JSON_INPUT_FILE"]
     print(f"[INFO] Starting to read '{input_file}'...")
-    points = []
     
-    def _process_locations_format(file_handle):
-        print("[INFO] 'locations' format detected. Processing...")
-        loc_points = []
-        E7 = 1e-7
-        locations = ijson.items(file_handle, 'locations.item')
-        for i, loc in enumerate(locations):
-            if 'latitudeE7' in loc and 'longitudeE7' in loc:
-                lat = loc['latitudeE7'] * E7
-                lon = loc['longitudeE7'] * E7
-                loc_points.append([lat, lon])
-            if (i + 1) % 50000 == 0:
-                print(f"  [PROGRESS] {i+1:,} locations processed...")
-        return loc_points
-
-    def _process_semantic_segments_format(file_handle, cfg):
-        print("[INFO] 'semanticSegments' format detected. Processing...")
-        sem_points = []
-        coord_regex = re.compile(r"([-]?\d+\.\d+)")
-        def parse_lat_lng_string(lat_lng_str):
-            if not isinstance(lat_lng_str, str): return None
-            try:
-                coords = [float(c) for c in coord_regex.findall(lat_lng_str)]
-                return [coords[0], coords[1]] if len(coords) == 2 else None
-            except (ValueError, AttributeError): return None
-        
-        segments = ijson.items(file_handle, 'semanticSegments.item')
-        for i, segment in enumerate(segments):
-            try:
-                if cfg["INCLUDE_RAW_PATH"] and 'timelinePath' in segment:
-                    for path_point in segment.get('timelinePath', []):
-                        if coords := parse_lat_lng_string(path_point.get('point')): sem_points.append(coords)
-                elif cfg["INCLUDE_VISITS"] and 'visit' in segment:
-                    if lat_lng := segment.get('visit', {}).get('topCandidate', {}).get('placeLocation', {}).get('latLng'):
-                        if coords := parse_lat_lng_string(lat_lng): sem_points.append(coords)
-                elif cfg["INCLUDE_ACTIVITIES"] and 'activity' in segment:
-                    activity = segment.get('activity', {})
-                    if start_lat_lng := activity.get('start', {}).get('latLng'):
-                        if coords := parse_lat_lng_string(start_lat_lng): sem_points.append(coords)
-                    if end_lat_lng := activity.get('end', {}).get('latLng'):
-                        if coords := parse_lat_lng_string(end_lat_lng): sem_points.append(coords)
-            except Exception:
-                print(f"\n[WARNING] Error processing segment #{i+1}. Skipping.")
-                continue
-            if (i + 1) % 20000 == 0:
-                print(f"  [PROGRESS] {i+1:,} segments processed...")
-        return sem_points
+    points = []
 
     try:
         with open(input_file, 'rb') as f:
-            prefix = f.read(2048)
-            f.seek(0)
-            if b'"locations"' in prefix: points = _process_locations_format(f)
-            elif b'"semanticSegments"' in prefix: points = _process_semantic_segments_format(f, config)
+            # Sniff the first few non-whitespace bytes to detect the root structure.
+            prefix = f.read(4096).strip()
+            f.seek(0) # Rewind the file for the actual parser.
+            
+            detected_format = None
+            
+            # Check if the file starts with '[' for the root array format.
+            if prefix.startswith(b'['):
+                detected_format = 'root_array'
+            # Otherwise, check for known keys if it's an object.
+            elif prefix.startswith(b'{'):
+                if b'"locations"' in prefix:
+                    detected_format = 'locations'
+                elif b'"semanticSegments"' in prefix:
+                    detected_format = 'semanticSegments'
+                elif b'"timelineObjects"' in prefix:
+                    detected_format = 'timelineObjects'
+
+            # Call the correct function based on the detected format.
+            if detected_format == 'root_array':
+                points = _process_root_array_format(f, config)
+            elif detected_format == 'locations':
+                points = _process_locations_format(f)
+            elif detected_format == 'semanticSegments':
+                points = _process_semantic_segments_format(f, config)
+            elif detected_format == 'timelineObjects':
+                points = _process_timeline_objects_format(f, config)
             else:
-                print("\n[ERROR] Could not determine JSON format.")
+                print("\n[ERROR] Could not determine JSON format. No known structure was identified.")
                 return None
+
     except ijson.common.IncompleteJSONError as e:
         print(f"\n[STRUCTURAL ERROR] A parsing error occurred: {e}")
         print("  > ACTION: Proceeding with the data read so far.")
     except FileNotFoundError:
-        print(f"\n[FATAL ERROR] Input file '{input_file}' not found.")
+        print(f"\n[FATAL ERROR] The input file '{input_file}' was not found.")
         return None
     except Exception as e:
         print(f"\n[FATAL ERROR] An unexpected error occurred: {e}")
         traceback.print_exc()
         return None
 
+    # --- Final Processing Report ---
     print("\n[INFO] File analysis complete.")
     print(f"  > Total coordinate points found: {len(points):,}")
+
     if not points:
-        print("\n[WARNING] No location points extracted.")
+        print("\n[WARNING] No location points were extracted. The HTML file will not be generated.")
         return None
+    
     return points
 
 def create_html_file(config, points):

@@ -18,12 +18,21 @@ The script is designed to be highly configurable, efficient with large data file
 
 ### Step 1: Get Your Location Data
 
+#### Android
 1. Go to your device's main Settings menu, not within the Google Maps app itself.
 2.  Navigate to the Location menu.
 3.  Select Location Services.
-4.  Tap on Timeline (this may also be called "Google Location History").
-5.  Find the settings option (often a ⋮ icon) and choose to Export timeline data.
-6.  Once exported, find the `Records.json` file inside the repository directory.
+4.  Tap on Timeline.
+5.  Export timeline data.
+6.  Once exported, place the `.json` file inside the repository directory.
+
+#### iOS
+1. Open the Google Maps app.
+2.  Tap your profile picture in the top-right corner, then select "Your timeline".
+3.  Tap the "..." (three dots) icon at the top right, then select "Location and privacy settings".
+4.  Scroll down and tap "Export Timeline Data".
+5.  Save the file to your phone, then transfer it to your computer.
+6.  Once exported, place the `.json` file inside the repository directory.
 
 ### Step 2: Set Up the Environment
 
