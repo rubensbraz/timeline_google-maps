@@ -50,3 +50,18 @@ The script is designed to be highly configurable, efficient with large data file
 - **Blur**: Adjusts the smoothness of the heat areas.
 - **Max Intensity**: A powerful setting for tuning the map's "sensitivity". A **lower** value makes the map appear "hotter" with less data, ideal for sparse histories. A **higher** value requires a greater concentration of data to show "hot" (red) areas.
 - **Heatmap Max Zoom**: An advanced setting that controls the zoom level at which the heatmap is rendered at its highest detail.
+
+## Contact
+
+Created by **Rubens Braz**.
+
+- **Email**: [rubensbrazf@gmail.com](mailto:rubensbrazf@gmail.com)
+
+## License
+
+This project is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License](LICENSE).
+
+[![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
+
+[cc-by-nc-sa]: http://creativecommons.org/licenses/by-nc-sa/4.0/
+[cc-by-nc-sa-shield]: https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png
